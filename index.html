@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Universe Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+            background-color: #000; /* Black background for space */
+        }
+        canvas {
+            display: block; /* Remove extra space below canvas */
+            width: 100vw; /* Full viewport width */
+            height: 100vh; /* Full viewport height */
+        }
+        /* Moved to bottom-center */
+        #audioControl {
+            position: absolute;
+            bottom: 20px; /* Position at bottom */
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: 1px solid white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-size: 16px;
+            z-index: 10;
+        }
+        #audioControl:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        /* Moved to bottom-right */
+        #defaultViewButton {
+            position: absolute;
+            bottom: 20px; /* Position at bottom */
+            right: 20px;
+            padding: 10px 15px;
+            background-color: rgba(25, 25, 112, 0.7);
+            color: white;
+            border: 1px solid #ADD8E6;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-size: 14px;
+            z-index: 10;
+        }
+        #defaultViewButton:hover {
+            background-color: rgba(65, 105, 225, 0.7);
+        }
+        /* Moved to bottom-left */
+        #travelModeButton {
+            position: absolute;
+            bottom: 20px; /* Position at bottom */
+            left: 20px;
+            padding: 10px 15px;
+            background-color: rgba(139, 0, 0, 0.7);
+            color: white;
+            border: 1px solid #FFD700;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-size: 14px;
+            z-index: 10;
+        }
+        #travelModeButton:hover {
+            background-color: rgba(255, 69, 0, 0.7);
+        }
+        /* Moved to bottom-center, slightly right of audio control */
+        #toggleViewButton {
+            position: absolute;
+            bottom: 20px; /* Position at bottom */
+            left: calc(50% + 110px); /* Adjust based on audioControl width + margin */
+            transform: translateX(-50%); /* Keep centered relative to its own width */
+            padding: 10px 15px;
+            background-color: rgba(0, 100, 0, 0.7);
+            color: white;
+            border: 1px solid #90EE90;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-size: 14px;
+            z-index: 10;
+            display: none; /* Hidden by default, only show in travel mode */
+        }
+        #toggleViewButton:hover {
+            background-color: rgba(60, 179, 113, 0.7);
+        }
+        #infoPanel {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            font-family: sans-serif;
+            font-size: 14px;
+            max-width: 300px;
+            text-align: center;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
+            display: none; /* Hidden by default */
+            z-index: 10;
+            backdrop-filter: blur(5px);
+        }
+        #infoPanel h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #FFD700;
+        }
+        #infoPanel p {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Background audio for space ambiance -->
+    <audio id="spaceAudio" loop volume="0.5">
+        <!-- New lofi music track -->
+        <source src="https://www.chosic.com/download-audio/24834/Interstellar%20Space.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+
+    <!-- Button to start/pause audio -->
+    <button id="audioControl">Start Lofi Music</button>
+
+    <!-- Button to go to default view -->
+    <button id="defaultViewButton">Go to Default View</button>
+
+    <!-- Button to toggle travel mode -->
+    <button id="travelModeButton">Toggle Travel Mode</button>
+
+    <!-- Button to toggle spaceship view (first-person/third-person) -->
+    <button id="toggleViewButton">View from Inside</button>
+
+    <!-- Information Panel -->
+    <div id="infoPanel">
+        <h3 id="infoTitle"></h3>
+        <p id="infoDescription"></p>
+    </div>
+
+    <script>
+        // Declare global variables for scene, camera, and renderer
+        let scene, camera, renderer;
+        // Variables for mouse interaction
+        let isDragging = false;
+        let previousMouseX = 0;
+        let previousMouseY = 0;
+
+        // Arrays to hold all celestial bodies for animation and selection
+        let allSuns = [];
+        let allPlanets = [];
+        let allMoons = [];
+        let allBlackHoles = [];
+        let allWhiteHoles = [];
+        let allAccretionDisks = [];
+        let allSolarSystemPivots = []; // Pivots for each solar system group
+
+        let galaxies = []; // Array to hold multiple galaxy objects
+        let asteroids = []; // Array to hold asteroid objects
+        let starsBackground; // Reference to the main starfield for twinkling
+        let nebulae = []; // Array to hold nebula objects
+
+        // Keyboard state and velocity for smoother movement
+        const keyboard = {};
+        const acceleration = 0.03;
+        const friction = 0.95;
+        const maxSpeed = 0.8;
+        let cameraVelocity = new THREE.Vector3();
+
+        // Animation clock for pulsating effects
+        const clock = new THREE.Clock();
+
+        // Audio element reference
+        let spaceAudio;
+        let processingAudio = false; // New flag to prevent rapid audio calls
+
+        // Raycaster for object selection
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let selectableObjects = [];
+
+        // Information panel elements
+        let infoPanel, infoTitle, infoDescription;
+
+        // Camera target for smooth movement (for object selection zoom or default view)
+        let cameraTargetPosition = new THREE.Vector3();
+        let cameraTargetLookAt = new THREE.Vector3();
+        let isCameraAnimating = false;
+        const animationDuration = 1000;
+        let animationStartTime = 0;
+
+        // Default camera position and look-at for the "Go to Default View" button
+        const defaultCameraPosition = new THREE.Vector3(0, 0, 20);
+        const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
+
+        // Spaceship variables
+        let spaceship; // The THREE.Object3D that the camera will be a child of
+        let spaceshipModel; // The visible 3D group of the spaceship parts
+        let inTravelMode = false; // Flag to track current mode
+        let isFirstPersonView = false; // Flag to track if currently in first-person view
+
+        // Function to initialize the 3D scene
+        function init() {
+            // 1. Scene: The container for all objects, lights, and cameras
+            scene = new THREE.Scene();
+
+            // 2. Camera: Defines what is visible in the scene
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.copy(defaultCameraPosition);
+            cameraTargetPosition.copy(camera.position);
+            cameraTargetLookAt.copy(defaultCameraLookAt);
+            camera.lookAt(defaultCameraLookAt);
+
+            // 3. Renderer: Renders the scene onto a canvas
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Get info panel elements
+            infoPanel = document.getElementById('infoPanel');
+            infoTitle = document.getElementById('infoTitle');
+            infoDescription = document.getElementById('infoDescription');
+
+            // --- Spaceship Setup (more detailed model) ---
+            spaceship = new THREE.Object3D(); // Parent group for spaceship and camera
+            scene.add(spaceship);
+
+            spaceshipModel = new THREE.Group(); // Group for the visible parts of the spaceship
+            spaceship.add(spaceshipModel); // Add the model group to the main spaceship object
+
+            // Scale the entire spaceship model down
+            spaceshipModel.scale.set(0.1, 0.1, 0.1); // Make it 1/10th of its original size
+
+            // Main Body (elongated cylinder)
+            const bodyGeometry = new THREE.CylinderGeometry(0.4, 0.6, 2.5, 16); // Slightly tapered
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x555555, specular: 0xAAAAAA, shininess: 80 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.x = Math.PI / 2; // Orient along -Z
+            spaceshipModel.add(body);
+
+            // Cockpit (front cone)
+            const cockpitGeometry = new THREE.ConeGeometry(0.4, 1, 16); // Tapered front
+            const cockpitMaterial = new THREE.MeshPhongMaterial({ color: 0x333333, specular: 0xAAAAAA, shininess: 80 });
+            const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+            cockpit.rotation.x = Math.PI / 2;
+            cockpit.position.z = -1.75; // Position at front of body
+            spaceshipModel.add(cockpit);
+
+            // Wings (more defined)
+            const wingGeometry = new THREE.BoxGeometry(0.1, 2.5, 0.3); // Thinner, longer wings
+            const wingMaterial = new THREE.MeshPhongMaterial({ color: 0x666666, specular: 0xAAAAAA, shininess: 80 });
+
+            const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            leftWing.position.set(-0.7, 0, 0);
+            leftWing.rotation.z = Math.PI / 2;
+            leftWing.rotation.y = Math.PI / 12; // Slight angle for dynamism
+            spaceshipModel.add(leftWing);
+
+            const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            rightWing.position.set(0.7, 0, 0);
+            rightWing.rotation.z = Math.PI / 2;
+            rightWing.rotation.y = -Math.PI / 12; // Slight angle for dynamism
+            spaceshipModel.add(rightWing);
+
+            // Engines (glowing red)
+            const engineGeometry = new THREE.CylinderGeometry(0.3, 0.4, 0.8, 8);
+            const engineMaterial = new THREE.MeshBasicMaterial({ color: 0xFF0000, emissive: 0xFF0000, emissiveIntensity: 1.5 });
+
+            const leftEngine = new THREE.Mesh(engineGeometry, engineMaterial);
+            leftEngine.rotation.x = Math.PI / 2;
+            leftEngine.position.set(-0.4, 0, 1.2);
+            spaceshipModel.add(leftEngine);
+
+            const rightEngine = new THREE.Mesh(engineGeometry, engineMaterial);
+            rightEngine.rotation.x = Math.PI / 2;
+            rightEngine.position.set(0.4, 0, 1.2);
+            spaceshipModel.add(rightEngine);
+
+            // Accent Lights (glowing blue)
+            const accentLightGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+            const accentLightMaterial = new THREE.MeshBasicMaterial({ color: 0x00FFFF, emissive: 0x00FFFF, emissiveIntensity: 1.0 });
+
+            const frontAccent = new THREE.Mesh(accentLightGeometry, accentLightMaterial);
+            frontAccent.position.set(0, 0.2, -1.8); // On cockpit
+            spaceshipModel.add(frontAccent);
+
+            const leftWingAccent = new THREE.Mesh(accentLightGeometry, accentLightMaterial);
+            leftWingAccent.position.set(-0.7, 0, -0.5); // On left wing
+            spaceshipModel.add(leftWingAccent);
+
+            const rightWingAccent = new THREE.Mesh(accentLightGeometry, accentLightMaterial);
+            rightWingAccent.position.set(0.7, 0, -0.5); // On right wing
+            spaceshipModel.add(rightWingAccent);
+
+            spaceshipModel.visible = false; // Hide spaceship model initially
+
+            // --- Lighting ---
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            scene.add(ambientLight);
+
+            // --- Stars Background (Spherical distribution for Universe feel) ---
+            const starGeometry = new THREE.BufferGeometry();
+            const starMaterial = new THREE.PointsMaterial({ color: 0xFFFFFF, size: 0.1, transparent: true, opacity: 1.0, depthWrite: false });
+
+            const starVertices = [];
+            const maxStarfieldRadius = 180;
+            for (let i = 0; i < 20000; i++) {
+                const radius = Math.random() * maxStarfieldRadius;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(Math.random() * 2 - 1);
+
+                const x = radius * Math.sin(phi) * Math.cos(theta);
+                const y = radius * Math.sin(phi) * Math.sin(theta);
+                const z = radius * Math.cos(phi);
+                starVertices.push(x, y, z);
+            }
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+
+            starsBackground = new THREE.Points(starGeometry, starMaterial);
+            scene.add(starsBackground);
+
+            // --- Function to create a solar system (sun, planets, moons) ---
+            function createSolarSystem(parentGroup, sunScale, basePlanetCount, maxAdditionalPlanets, maxMoonsPerPlanet) {
+                const solarSystemGroup = new THREE.Object3D();
+                parentGroup.add(solarSystemGroup);
+                allSolarSystemPivots.push(solarSystemGroup);
+
+                const sunRadius = sunScale * (1 + Math.random() * 0.5);
+
+                // Sun
+                const sunGeometry = new THREE.SphereGeometry(sunRadius, 32, 32);
+                const sunMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xFFA500,
+                    emissive: 0xFFA500,
+                    emissiveIntensity: 1.0
+                });
+                const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+                sun.userData = { name: "Star", description: "A luminous sphere of plasma held together by its own gravity." };
+                solarSystemGroup.add(sun);
+                selectableObjects.push(sun);
+                allSuns.push(sun);
+
+                // Sun Glow (Corona effect)
+                const sunGlowGeometry = new THREE.SphereGeometry(sunRadius * 1.25, 32, 32);
+                const sunGlowMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xFFA500,
+                    transparent: true,
+                    opacity: 0.2,
+                    emissive: 0xFFA500,
+                    emissiveIntensity: 2.0,
+                    side: THREE.BackSide,
+                    depthWrite: false
+                });
+                const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+                sun.add(sunGlow);
+
+                // Light source for the sun
+                const sunLight = new THREE.PointLight(0xFFFFFF, 1, 100 * sunScale);
+                sun.add(sunLight);
+
+                // Planets
+                const actualPlanetCount = basePlanetCount + Math.floor(Math.random() * maxAdditionalPlanets);
+                for (let i = 0; i < actualPlanetCount; i++) {
+                    const planetRadius = sunRadius * (0.1 + Math.random() * 0.2);
+                    const orbitDistance = sunRadius * (3 + i * 2 + Math.random() * 1);
+                    const planetGeometry = new THREE.SphereGeometry(planetRadius, 32, 32);
+                    const planetMaterial = new THREE.MeshPhongMaterial({
+                        color: new THREE.Color(Math.random(), Math.random(), Math.random()),
+                        specular: 0x888888,
+                        shininess: 50
+                    });
+                    const planet = new THREE.Mesh(planetGeometry, planetMaterial);
+                    planet.position.set(orbitDistance, 0, 0);
+                    planet.userData = {
+                        name: `Planet ${String.fromCharCode(65 + i)}`,
+                        description: `An exoplanet orbiting a distant star. Its color is #${planet.material.color.getHexString()}.`
+                    };
+                    planet.orbitSpeed = 0.005 + Math.random() * 0.005;
+                    solarSystemGroup.add(planet);
+                    selectableObjects.push(planet);
+                    allPlanets.push(planet);
+
+                    // Planet Atmosphere
+                    const planetAtmosphereGeometry = new THREE.SphereGeometry(planetRadius * 1.1, 32, 32);
+                    const planetAtmosphereMaterial = new THREE.MeshBasicMaterial({
+                        color: planet.material.color.getHex(),
+                        transparent: true,
+                        opacity: 0.1,
+                        side: THREE.BackSide,
+                        depthWrite: false
+                    });
+                    const planetAtmosphere = new THREE.Mesh(planetAtmosphereGeometry, planetAtmosphereMaterial);
+                    planet.add(planetAtmosphere);
+
+                    // Moons for this planet
+                    const actualMoonCount = Math.floor(Math.random() * (maxMoonsPerPlanet + 1));
+                    for (let j = 0; j < actualMoonCount; j++) {
+                        const moonRadius = planetRadius * (0.2 + Math.random() * 0.3);
+                        const moonOrbitDistance = planetRadius * (2 + j * 0.5 + Math.random() * 0.5);
+                        const moonGeometry = new THREE.SphereGeometry(moonRadius, 16, 16);
+                        const moonMaterial = new THREE.MeshPhongMaterial({ color: 0xCCCCCC, specular: 0x555555, shininess: 20 });
+                        const moon = new THREE.Mesh(moonGeometry, moonMaterial);
+                        moon.position.set(moonOrbitDistance, 0, 0);
+                        moon.userData = {
+                            name: `Moon ${j + 1} of Planet ${String.fromCharCode(65 + i)}`,
+                            description: `A natural satellite orbiting Planet ${String.fromCharCode(65 + i)}.`
+                        };
+                        moon.orbitSpeed = 0.02 + Math.random() * 0.02;
+                        moon.userData.orbitRadius = moonOrbitDistance;
+                        planet.add(moon);
+                        selectableObjects.push(moon);
+                        allMoons.push(moon);
+                    }
+                }
+            }
+
+            // Create the central solar system
+            createSolarSystem(scene, 2, 2, 1, 1);
+
+            // --- Multiple Galaxies (representing a Multiverse) ---
+            const numberOfGalaxies = 20;
+            for (let i = 0; i < numberOfGalaxies; i++) {
+                const galaxySize = 8 + Math.random() * 7;
+                const galaxyGeometry = new THREE.SphereGeometry(galaxySize, 32, 32);
+                const galaxyMaterial = new THREE.MeshBasicMaterial({
+                    color: new THREE.Color(Math.random(), Math.random(), Math.random()),
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.03 + Math.random() * 0.02,
+                    depthWrite: false
+                });
+                const newGalaxy = new THREE.Mesh(galaxyGeometry, galaxyMaterial);
+
+                newGalaxy.position.set(
+                    (Math.random() - 0.5) * 300,
+                    (Math.random() - 0.5) * 300,
+                    (Math.random() - 0.5) * 300
+                );
+                scene.add(newGalaxy);
+                galaxies.push(newGalaxy);
+
+                // Add stars inside each galaxy
+                const galaxyStarCount = 500 + Math.floor(Math.random() * 500);
+                const galaxyStarGeometry = new THREE.BufferGeometry();
+                const galaxyStarMaterial = new THREE.PointsMaterial({ color: 0xFFFFFF, size: 0.05 });
+
+                const galaxyStarVertices = [];
+                const innerRadius = galaxySize * 0.8;
+                for (let j = 0; j < galaxyStarCount; j++) {
+                    const u = Math.random();
+                    const v = Math.random();
+                    const theta = u * Math.PI * 2;
+                    const phi = Math.acos(2 * v - 1);
+                    const radius = Math.random() * innerRadius;
+
+                    const x = radius * Math.sin(phi) * Math.cos(theta);
+                    const y = radius * Math.sin(phi) * Math.sin(theta);
+                    const z = radius * Math.cos(phi);
+                    galaxyStarVertices.push(x, y, z);
+                }
+                galaxyStarGeometry.setAttribute('position', new THREE.Float32BufferAttribute(galaxyStarVertices, 3));
+                const galaxyStars = new THREE.Points(galaxyStarGeometry, galaxyStarMaterial);
+                newGalaxy.add(galaxyStars);
+
+                // Randomly add a solar system to this galaxy
+                if (Math.random() > 0.4) {
+                    createSolarSystem(newGalaxy, galaxySize * 0.05, 1, 2, 1);
+                }
+            }
+
+            // --- Asteroids ---
+            const numberOfAsteroids = 100;
+            const asteroidMaterial = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x222222, shininess: 10 });
+            for (let i = 0; i < numberOfAsteroids; i++) {
+                const asteroidSize = 0.2 + Math.random() * 0.8;
+                const asteroidGeometry = new THREE.DodecahedronGeometry(asteroidSize, 0);
+                const asteroid = new THREE.Mesh(asteroidGeometry, asteroidMaterial);
+
+                asteroid.position.set(
+                    (Math.random() - 0.5) * 120,
+                    (Math.random() - 0.5) * 120,
+                    (Math.random() - 0.5) * 120
+                );
+
+                asteroid.rotation.set(
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2
+                );
+
+                asteroid.rotationSpeed = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.005,
+                    (Math.random() - 0.5) * 0.005,
+                    (Math.random() - 0.5) * 0.005
+                );
+
+                asteroid.driftSpeed = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.005,
+                    (Math.random() - 0.5) * 0.005,
+                    (Math.random() - 0.5) * 0.005
+                );
+
+                scene.add(asteroid);
+                asteroids.push(asteroid);
+            }
+
+            // --- Nebulae and Cosmic Clouds ---
+            const numberOfNebulae = 3;
+            const nebulaColors = [0xFF00FF, 0x00FFFF, 0xFFFF00, 0xFF6600, 0x00FF66];
+
+            for (let i = 0; i < numberOfNebulae; i++) {
+                const nebulaSize = 25 + Math.random() * 25;
+                const nebulaGeometry = new THREE.SphereGeometry(nebulaSize, 32, 32);
+                const nebulaMaterial = new THREE.MeshBasicMaterial({
+                    color: nebulaColors[Math.floor(Math.random() * nebulaColors.length)],
+                    transparent: true,
+                    opacity: 0.02 + Math.random() * 0.03,
+                    side: THREE.DoubleSide,
+                    depthWrite: false
+                });
+                const nebula = new THREE.Mesh(nebulaGeometry, nebulaMaterial);
+
+                nebula.position.set(
+                    (Math.random() - 0.5) * 200,
+                    (Math.random() - 0.5) * 200,
+                    (Math.random() - 0.5) * 200
+                );
+
+                nebula.rotationSpeed = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.0001,
+                    (Math.random() - 0.5) * 0.0001,
+                    (Math.random() - 0.5) * 0.0001
+                );
+
+                scene.add(nebula);
+                nebulae.push(nebula);
+            }
+
+            // --- Black Hole ---
+            const blackHoleGeometry = new THREE.SphereGeometry(1.5, 64, 64);
+            const blackHoleMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            blackHole1 = new THREE.Mesh(blackHoleGeometry, blackHoleMaterial);
+            blackHole1.position.set(20, 10, -15);
+            blackHole1.userData = { name: "Black Hole", description: "A region of spacetime where gravity is so strong that nothing—no particles or even electromagnetic radiation such as light—can escape from it." };
+            scene.add(blackHole1);
+            selectableObjects.push(blackHole1);
+
+            // Black Hole Accretion Disk
+            const accretionDiskGeometry = new THREE.RingGeometry(2, 3, 64);
+            const accretionDiskMaterial = new THREE.MeshBasicMaterial({
+                color: 0xFF8C00,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.7,
+                emissive: 0xFF8C00,
+                emissiveIntensity: 0.8,
+                depthWrite: false
+            });
+            blackHoleAccretionDisk = new THREE.Mesh(accretionDiskGeometry, accretionDiskMaterial);
+            blackHoleAccretionDisk.rotation.x = Math.PI / 2;
+            blackHoleAccretionDisk.position.copy(blackHole1.position);
+            scene.add(blackHoleAccretionDisk);
+
+
+            // White Hole
+            const whiteHoleGeometry = new THREE.SphereGeometry(1.2, 32, 32);
+            const whiteHoleMaterial = new THREE.MeshBasicMaterial({
+                color: 0xFFFFFF,
+                emissive: 0xFFFFFF,
+                emissiveIntensity: 1.5
+            });
+            whiteHole1 = new THREE.Mesh(whiteHoleGeometry, whiteHoleMaterial);
+            whiteHole1.position.set(-25, -10, 5);
+            whiteHole1.userData = { name: "White Hole", description: "A hypothetical region of spacetime which cannot be entered from the outside, although matter and light can escape from it." };
+            scene.add(whiteHole1);
+            selectableObjects.push(whiteHole1);
+
+            const whiteHoleLight = new THREE.PointLight(0xFFFFFF, 0.7, 50);
+            whiteHoleLight.position.copy(whiteHole1.position);
+            scene.add(whiteHoleLight);
+
+
+            // --- Event Listeners for Interaction and Responsiveness ---
+            window.addEventListener('resize', onWindowResize, false);
+            renderer.domElement.addEventListener('mousedown', onMouseDown, false);
+            renderer.domElement.addEventListener('mouseup', onMouseUp, false);
+            renderer.domElement.addEventListener('mousemove', onMouseMove, false);
+            renderer.domElement.addEventListener('wheel', onMouseWheel, false);
+            renderer.domElement.addEventListener('click', onCanvasClick, false);
+
+            // Keyboard event listeners
+            document.addEventListener('keydown', onKeyDown, false);
+            document.addEventListener('keyup', onKeyUp, false);
+        }
+
+        // Function to handle window resizing
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Function for mouse down event
+        function onMouseDown(event) {
+            isDragging = true;
+            previousMouseX = event.clientX;
+            previousMouseY = event.clientY;
+        }
+
+        // Function for mouse up event
+        function onMouseUp(event) {
+            isDragging = false;
+        }
+
+        // Function for mouse move event
+        function onMouseMove(event) {
+            if (!isDragging) return;
+
+            const deltaX = event.clientX - previousMouseX;
+            const deltaY = event.clientY - previousMouseY;
+
+            const rotationSpeed = 0.005;
+
+            if (inTravelMode) {
+                // Rotate the spaceship directly, camera is child of spaceship
+                spaceship.rotation.y += deltaX * rotationSpeed;
+                spaceship.rotation.x += deltaY * rotationSpeed;
+                // Clamp vertical rotation of spaceship
+                spaceship.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, spaceship.rotation.x));
+            } else {
+                // Rotate the camera directly
+                camera.rotation.y += deltaX * rotationSpeed;
+                camera.rotation.x += deltaY * rotationSpeed;
+                // Clamp vertical rotation of camera
+                camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+            }
+
+            previousMouseX = event.clientX;
+            previousMouseY = event.clientY;
+        }
+
+        // Function for mouse wheel event (zoom in/out)
+        function onMouseWheel(event) {
+            event.preventDefault();
+
+            const zoomSpeed = 1.0;
+            // Move camera along its local Z-axis
+            camera.translateZ(event.deltaY * 0.05 * zoomSpeed);
+
+            // Clamp zoom level to prevent going too far or too close
+            const currentZ = camera.position.z;
+            if (currentZ < 5) camera.position.z = 5;
+            if (currentZ > 100) camera.position.z = 100;
+        }
+
+        // Keyboard event handlers
+        function onKeyDown(event) {
+            keyboard[event.key.toLowerCase()] = true;
+        }
+
+        function onKeyUp(event) {
+            keyboard[event.key.toLowerCase()] = false;
+        }
+
+        // Function to handle clicks on the canvas for object selection
+        function onCanvasClick(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Update the raycaster with the camera and mouse position
+            raycaster.setFromCamera(mouse, camera);
+
+            // Calculate objects intersecting the raycaster
+            const intersects = raycaster.intersectObjects(selectableObjects, true);
+
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+
+                let targetObject = clickedObject;
+                while (targetObject && !targetObject.userData.name && targetObject.parent) {
+                    targetObject = targetObject.parent;
+                }
+
+                if (targetObject && targetObject.userData.name) {
+                    // Disable manual movement when animating to target
+                    isCameraAnimating = true;
+
+                    // Store current camera state for smooth transition
+                    const startPosition = camera.position.clone();
+                    const startQuaternion = camera.quaternion.clone();
+
+                    // Calculate target position and look-at
+                    const offset = targetObject.geometry.boundingSphere ? targetObject.geometry.boundingSphere.radius * 3 : 5;
+                    cameraTargetPosition.copy(targetObject.position).add(new THREE.Vector3(0, 0, offset).applyQuaternion(camera.quaternion));
+                    cameraTargetLookAt.copy(targetObject.position);
+
+                    animationStartTime = performance.now();
+
+                    infoTitle.textContent = targetObject.userData.name;
+                    infoDescription.textContent = targetObject.userData.description;
+                    infoPanel.style.display = 'block';
+                }
+            } else {
+                infoPanel.style.display = 'none';
+                isCameraAnimating = false; // Stop animation if clicking empty space
+            }
+        }
+
+        // Function to reset camera to default view
+        function goToDefaultView() {
+            // Ensure we are not in travel mode when going to default view
+            if (inTravelMode) {
+                toggleTravelMode(); // Exit travel mode first
+            }
+
+            cameraTargetPosition.copy(defaultCameraPosition);
+            cameraTargetLookAt.copy(defaultCameraLookAt);
+            isCameraAnimating = true;
+            animationStartTime = performance.now();
+            infoPanel.style.display = 'none';
+        }
+
+        // Function to toggle travel mode (enter/exit spaceship control)
+        function toggleTravelMode() {
+            if (inTravelMode) {
+                // Exiting travel mode
+                spaceship.remove(camera); // Detach camera from spaceship
+                scene.add(camera); // Add camera back to scene
+
+                // Position camera at spaceship's current location and orientation
+                camera.position.copy(spaceship.position);
+                camera.rotation.copy(spaceship.rotation);
+
+                spaceshipModel.visible = false; // Hide spaceship model
+                document.getElementById('toggleViewButton').style.display = 'none'; // Hide view toggle button
+                inTravelMode = false;
+                document.getElementById('travelModeButton').textContent = "Toggle Travel Mode";
+            } else {
+                // Entering travel mode
+                // Position spaceship at current camera location and orientation
+                spaceship.position.copy(camera.position);
+                spaceship.rotation.copy(camera.rotation);
+
+                scene.remove(camera); // Remove camera from scene
+                spaceship.add(camera); // Make camera child of spaceship
+
+                // Set initial view to third-person
+                isFirstPersonView = false;
+                setSpaceshipView(); // Apply the view
+
+                document.getElementById('toggleViewButton').style.display = 'block'; // Show view toggle button
+                inTravelMode = true;
+                document.getElementById('travelModeButton').textContent = "Exit Travel Mode";
+                isCameraAnimating = false; // Stop any ongoing camera animation
+                infoPanel.style.display = 'none'; // Hide info panel
+            }
+            // Reset camera velocity when toggling modes to avoid sudden jumps
+            cameraVelocity.set(0, 0, 0);
+        }
+
+        // Function to toggle between first-person and third-person spaceship view
+        function toggleSpaceshipView() {
+            isFirstPersonView = !isFirstPersonView; // Toggle the flag
+            setSpaceshipView(); // Apply the new view
+        }
+
+        // Helper function to set the camera position relative to the spaceship based on view mode
+        function setSpaceshipView() {
+            if (isFirstPersonView) {
+                // First-person view (inside cockpit)
+                camera.position.set(0, 0, -0.05); // Very close to the origin of the spaceship group
+                camera.lookAt(new THREE.Vector3(0, 0, -1)); // Look forward relative to spaceship
+                spaceshipModel.visible = false; // Hide the spaceship model
+                document.getElementById('toggleViewButton').textContent = "View from Outside";
+            } else {
+                // Third-person view (behind spaceship)
+                // Adjusted positions to account for spaceshipModel.scale.set(0.1, 0.1, 0.1)
+                camera.position.set(0, 0.05, 0.2); // Slightly above and behind the cockpit, scaled
+                camera.lookAt(new THREE.Vector3(0, 0, -1)); // Look forward relative to spaceship
+                spaceshipModel.visible = true; // Show the spaceship model
+                document.getElementById('toggleViewButton').textContent = "View from Inside";
+            }
+        }
+
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+
+            // Smooth camera animation (for object selection zoom or default view)
+            if (isCameraAnimating) {
+                const now = performance.now();
+                const t = Math.min(1, (now - animationStartTime) / animationDuration);
+
+                // Interpolate camera position
+                camera.position.lerpVectors(camera.position, cameraTargetPosition, t);
+
+                // Interpolate camera look-at (rotation)
+                const currentLookAt = new THREE.Vector3();
+                camera.getWorldDirection(currentLookAt).negate();
+                const newLookAt = new THREE.Vector3().lerpVectors(currentLookAt, cameraTargetLookAt.clone().sub(camera.position).normalize(), t);
+                camera.lookAt(camera.position.clone().add(newLookAt));
+
+                if (t >= 1) {
+                    isCameraAnimating = false;
+                }
+            } else {
+                // Manual keyboard movement with acceleration/friction
+                const direction = new THREE.Vector3();
+                if (keyboard['w']) direction.z -= 1;
+                if (keyboard['s']) direction.z += 1;
+                if (keyboard['a']) direction.x -= 1;
+                if (keyboard['d']) direction.x += 1;
+                if (keyboard['q']) direction.y += 1;
+                if (keyboard['e']) direction.y -= 1;
+
+                if (direction.lengthSq() > 0) {
+                    direction.normalize();
+                    cameraVelocity.add(direction.multiplyScalar(acceleration));
+                    if (cameraVelocity.length() > maxSpeed) {
+                        cameraVelocity.setLength(maxSpeed);
+                    }
+                } else {
+                    cameraVelocity.multiplyScalar(friction);
+                    if (cameraVelocity.length() < 0.01) {
+                        cameraVelocity.set(0, 0, 0);
+                    }
+                }
+
+                // Apply movement based on current mode
+                const targetObject = inTravelMode ? spaceship : camera;
+                const cameraDirection = new THREE.Vector3();
+                targetObject.getWorldDirection(cameraDirection); // Get forward direction of target object
+                const cameraRight = new THREE.Vector3().crossVectors(targetObject.up, cameraDirection).normalize(); // Get right direction
+
+                const moveVector = new THREE.Vector3()
+                    .add(cameraDirection.clone().multiplyScalar(-cameraVelocity.z)) // Forward/Backward
+                    .add(cameraRight.clone().multiplyScalar(cameraVelocity.x))      // Strafe Left/Right
+                    .add(targetObject.up.clone().multiplyScalar(cameraVelocity.y));       // Up/Down
+
+                targetObject.position.add(moveVector);
+            }
+
+            // Twinkling Stars Effect (modulate opacity of the main starfield)
+            starsBackground.material.opacity = 0.8 + Math.sin(elapsedTime * 1.5) * 0.2;
+
+            // Rotate the stars background slowly
+            starsBackground.rotation.y += 0.0002;
+
+            // Animate all solar system pivots (orbits around their parent, scene or galaxy)
+            allSolarSystemPivots.forEach(pivot => {
+                pivot.rotation.y += 0.001;
+            });
+
+            // Animate individual planet self-rotations
+            allPlanets.forEach(planet => {
+                planet.rotation.y += 0.01;
+            });
+
+            // Animate moons (self-rotation and orbit around their planets)
+            allMoons.forEach(moon => {
+                moon.rotation.y += 0.03;
+
+                const parentPlanet = moon.parent;
+                if (parentPlanet && moon.userData.orbitSpeed && moon.userData.orbitRadius) {
+                    moon.position.x = Math.cos(elapsedTime * moon.userData.orbitSpeed) * moon.userData.orbitRadius;
+                    moon.position.z = Math.sin(elapsedTime * moon.userData.orbitSpeed) * moon.userData.orbitRadius;
+                }
+            });
+
+            // Rotate the black hole and its accretion disk
+            blackHole1.rotation.y += 0.001;
+            blackHoleAccretionDisk.rotation.z += 0.005;
+
+            // White Hole Pulsating Effect
+            whiteHole1.material.emissiveIntensity = 1.5 + Math.sin(elapsedTime * 3) * 0.5;
+
+            // Rotate each galaxy slightly
+            galaxies.forEach(galaxy => {
+                galaxy.rotation.y += 0.0001;
+                galaxy.rotation.x += 0.00005;
+            });
+
+            // Animate asteroids (rotation and drift)
+            asteroids.forEach(asteroid => {
+                asteroid.rotation.x += asteroid.rotationSpeed.x;
+                asteroid.rotation.y += asteroid.rotationSpeed.y;
+                asteroid.rotation.z += asteroid.rotationSpeed.z;
+
+                asteroid.position.x += asteroid.driftSpeed.x;
+                asteroid.position.y += asteroid.driftSpeed.y;
+                asteroid.position.z += asteroid.driftSpeed.z;
+
+                const wrapDistance = 60;
+                if (asteroid.position.x > wrapDistance) asteroid.position.x = -wrapDistance;
+                if (asteroid.position.x < -wrapDistance) asteroid.position.x = wrapDistance;
+                if (asteroid.position.y > wrapDistance) asteroid.position.y = -wrapDistance;
+                if (asteroid.position.y < -wrapDistance) asteroid.position.y = wrapDistance;
+                if (asteroid.position.z > wrapDistance) asteroid.position.z = -wrapDistance;
+                if (asteroid.position.z < -wrapDistance) asteroid.position.z = wrapDistance;
+            });
+
+            // Animate nebulae (subtle rotation)
+            nebulae.forEach(nebula => {
+                nebula.rotation.x += nebula.rotationSpeed.x;
+                nebula.rotation.y += nebula.rotationSpeed.y;
+                nebula.rotation.z += nebula.rotationSpeed.z;
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        // Start the animation on window load
+        window.onload = function () {
+            init();
+
+            // Get the audio element
+            spaceAudio = document.getElementById('spaceAudio');
+
+            const audioControl = document.getElementById('audioControl');
+            const defaultViewButton = document.getElementById('defaultViewButton');
+            const travelModeButton = document.getElementById('travelModeButton');
+            const toggleViewButton = document.getElementById('toggleViewButton');
+
+            audioControl.addEventListener('click', async () => {
+                // Prevent multiple clicks from triggering simultaneous audio operations
+                if (processingAudio) {
+                    console.log("Audio control already processing, ignoring click.");
+                    return;
+                }
+                processingAudio = true; // Set flag to true
+
+                if (spaceAudio.paused) {
+                    try {
+                        await spaceAudio.play(); // Attempt to play the audio. This returns a Promise.
+                        audioControl.textContent = "Pause Lofi Music";
+                    } catch (e) {
+                        console.error("Audio play failed:", e);
+                        audioControl.textContent = "Start Lofi Music (Error)"; // Provide error feedback
+                    }
+                } else {
+                    spaceAudio.pause();
+                    audioControl.textContent = "Start Lofi Music";
+                }
+                processingAudio = false; // Reset flag after operation completes
+            });
+
+            defaultViewButton.addEventListener('click', goToDefaultView);
+            travelModeButton.addEventListener('click', toggleTravelMode);
+            toggleViewButton.addEventListener('click', toggleSpaceshipView);
+
+            animate();
+        };
+    </script>
+</body>
+</html>
