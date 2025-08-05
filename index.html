@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Universe Simulation</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Include Tone.js library for audio synthesis -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -16,84 +18,74 @@
             width: 100vw; /* Full viewport width */
             height: 100vh; /* Full viewport height */
         }
-        /* Moved to bottom-center */
-        #audioControl {
+        /* Container for all buttons at the bottom */
+        #buttonContainer {
             position: absolute;
-            bottom: 20px; /* Position at bottom */
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 10px 20px;
-            background-color: rgba(0, 0, 0, 0.5);
-            color: white;
-            border: 1px solid white;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            display: flex; /* Use flexbox for layout */
+            justify-content: center; /* Center buttons horizontally */
+            align-items: center;
+            gap: 15px; /* Space between buttons */
+            flex-wrap: wrap; /* Allow buttons to wrap to the next line on smaller screens */
+            padding: 0 10px; /* Add some padding on sides */
+            box-sizing: border-box; /* Include padding in width */
+            z-index: 10; /* Ensure buttons are above the canvas */
+        }
+
+        /* Base style for all buttons */
+        #buttonContainer button {
+            position: static; /* Override absolute positioning from previous versions */
+            transform: none; /* Override transform from previous versions */
+            margin: 0; /* Reset margins */
+            padding: 10px 15px;
             border-radius: 5px;
             cursor: pointer;
             font-family: sans-serif;
-            font-size: 16px;
-            z-index: 10;
+            font-size: 14px;
+            color: white;
+            white-space: nowrap; /* Prevent text from wrapping inside buttons */
+        }
+
+        /* Specific button styles */
+        #audioControl {
+            background-color: rgba(0, 0, 0, 0.5);
+            border: 1px solid white;
         }
         #audioControl:hover {
             background-color: rgba(255, 255, 255, 0.2);
         }
-        /* Moved to bottom-right */
+
         #defaultViewButton {
-            position: absolute;
-            bottom: 20px; /* Position at bottom */
-            right: 20px;
-            padding: 10px 15px;
-            background-color: rgba(25, 25, 112, 0.7);
-            color: white;
-            border: 1px solid #ADD8E6;
-            border-radius: 5px;
-            cursor: pointer;
-            font-family: sans-serif;
-            font-size: 14px;
-            z-index: 10;
+            background-color: rgba(25, 25, 112, 0.7); /* Dark blue */
+            border: 1px solid #ADD8E6; /* Light blue border */
         }
         #defaultViewButton:hover {
-            background-color: rgba(65, 105, 225, 0.7);
+            background-color: rgba(65, 105, 225, 0.7); /* Royal blue on hover */
         }
-        /* Moved to bottom-left */
+
         #travelModeButton {
-            position: absolute;
-            bottom: 20px; /* Position at bottom */
-            left: 20px;
-            padding: 10px 15px;
-            background-color: rgba(139, 0, 0, 0.7);
-            color: white;
-            border: 1px solid #FFD700;
-            border-radius: 5px;
-            cursor: pointer;
-            font-family: sans-serif;
-            font-size: 14px;
-            z-index: 10;
+            background-color: rgba(139, 0, 0, 0.7); /* Dark red */
+            border: 1px solid #FFD700; /* Gold border */
         }
         #travelModeButton:hover {
-            background-color: rgba(255, 69, 0, 0.7);
+            background-color: rgba(255, 69, 0, 0.7); /* Orange-red on hover */
         }
-        /* Moved to bottom-center, slightly right of audio control */
+
         #toggleViewButton {
-            position: absolute;
-            bottom: 20px; /* Position at bottom */
-            left: calc(50% + 110px); /* Adjust based on audioControl width + margin */
-            transform: translateX(-50%); /* Keep centered relative to its own width */
-            padding: 10px 15px;
-            background-color: rgba(0, 100, 0, 0.7);
-            color: white;
-            border: 1px solid #90EE90;
-            border-radius: 5px;
-            cursor: pointer;
-            font-family: sans-serif;
-            font-size: 14px;
-            z-index: 10;
+            background-color: rgba(0, 100, 0, 0.7); /* Dark green */
+            border: 1px solid #90EE90; /* Light green border */
             display: none; /* Hidden by default, only show in travel mode */
         }
         #toggleViewButton:hover {
             background-color: rgba(60, 179, 113, 0.7);
         }
+
+        /* Information Panel */
         #infoPanel {
             position: absolute;
-            bottom: 20px;
+            bottom: 80px; /* Position above the buttons */
             left: 50%;
             transform: translateX(-50%);
             background-color: rgba(0, 0, 0, 0.7);
@@ -120,24 +112,13 @@
     </style>
 </head>
 <body>
-    <!-- Background audio for space ambiance -->
-    <audio id="spaceAudio" loop volume="0.5">
-        <!-- New lofi music track -->
-        <source src="https://www.chosic.com/download-audio/24834/Interstellar%20Space.mp3" type="audio/mpeg">
-        Your browser does not support the audio element.
-    </audio>
-
-    <!-- Button to start/pause audio -->
-    <button id="audioControl">Start Lofi Music</button>
-
-    <!-- Button to go to default view -->
-    <button id="defaultViewButton">Go to Default View</button>
-
-    <!-- Button to toggle travel mode -->
-    <button id="travelModeButton">Toggle Travel Mode</button>
-
-    <!-- Button to toggle spaceship view (first-person/third-person) -->
-    <button id="toggleViewButton">View from Inside</button>
+    <!-- Button Container -->
+    <div id="buttonContainer">
+        <button id="travelModeButton">Toggle Travel Mode</button>
+        <button id="audioControl">Start Lofi Music</button>
+        <button id="toggleViewButton">View from Inside</button>
+        <button id="defaultViewButton">Go to Default View</button>
+    </div>
 
     <!-- Information Panel -->
     <div id="infoPanel">
@@ -177,9 +158,10 @@
         // Animation clock for pulsating effects
         const clock = new THREE.Clock();
 
-        // Audio element reference
-        let spaceAudio;
-        let processingAudio = false; // New flag to prevent rapid audio calls
+        // Tone.js oscillator for the ambient sound
+        let ambientOscillator;
+        let isAudioPlaying = false; // Flag to track Tone.js playback state
+        let processingAudio = false; // Flag to prevent rapid audio calls
 
         // Raycaster for object selection
         const raycaster = new THREE.Raycaster();
@@ -924,8 +906,14 @@
         window.onload = function () {
             init();
 
-            // Get the audio element
-            spaceAudio = document.getElementById('spaceAudio');
+            // Initialize Tone.js oscillator for the ambient sound
+            // This replaces the HTML audio tag with a synthesized drone
+            ambientOscillator = new Tone.Oscillator({
+                frequency: "C1", // A very low frequency (C1 is about 32.7 Hz)
+                type: "sine",    // Sine wave for a pure, smooth tone
+                volume: -15      // Adjusted volume to be audible but still background
+            }).toDestination();
+            // Do NOT call .start() here. It will be called on first user interaction.
 
             const audioControl = document.getElementById('audioControl');
             const defaultViewButton = document.getElementById('defaultViewButton');
@@ -940,19 +928,29 @@
                 }
                 processingAudio = true; // Set flag to true
 
-                if (spaceAudio.paused) {
-                    try {
-                        await spaceAudio.play(); // Attempt to play the audio. This returns a Promise.
+                try {
+                    // Tone.js requires a user gesture to start the audio context
+                    await Tone.start(); // This will resume the audio context if suspended
+
+                    if (isAudioPlaying) { // Check our internal state
+                        ambientOscillator.stop(Tone.now()); // Stop the Tone.js oscillator at current time
+                        isAudioPlaying = false;
+                        audioControl.textContent = "Start Lofi Music";
+                        console.log("Audio paused.");
+                    } else {
+                        // Start the oscillator from the current time.
+                        // This ensures it doesn't try to start from a previous stopped point.
+                        ambientOscillator.start(Tone.now());
+                        isAudioPlaying = true;
                         audioControl.textContent = "Pause Lofi Music";
-                    } catch (e) {
-                        console.error("Audio play failed:", e);
-                        audioControl.textContent = "Start Lofi Music (Error)"; // Provide error feedback
+                        console.log("Audio started playing.");
                     }
-                } else {
-                    spaceAudio.pause();
-                    audioControl.textContent = "Start Lofi Music";
+                } catch (e) {
+                    console.error("Audio control failed:", e);
+                    audioControl.textContent = "Start Lofi Music (Error)"; // Provide error feedback
+                } finally {
+                    processingAudio = false; // Always reset flag after operation completes or errors
                 }
-                processingAudio = false; // Reset flag after operation completes
             });
 
             defaultViewButton.addEventListener('click', goToDefaultView);
